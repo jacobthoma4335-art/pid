@@ -1,5 +1,5 @@
- import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Button, Slider
 import numpy as np
 from scipy import signal
 
@@ -10,7 +10,7 @@ tau = 0.15  # Motor dynamic time constant
 
 # Initial Parameters
 target_linear_speed_init = 1.0  # Target forward speed in m/s
-Kp_init = 8.0
+Kp_init = 300.0
 Ki_init = 200.0
 Kd_init = 0.02
 
@@ -20,15 +20,16 @@ t = np.linspace(0, 2.0, 1000)
 
 def compute_response(v_target, kp, ki, kd):
     """Calculates motor model and closed-loop linear velocity response."""
-    # Target angular speed calculation
     target_angular_speed_rad = v_target / wheel_radius
+
+    # Plant DC gain: angular speed per volt
     K_motor = target_angular_speed_rad / V_nominal
 
-    # Motor plant G(s)
+    # Motor plant G(s) = K_motor / (tau*s + 1)
     num_g = [K_motor]
     den_g = [tau, 1]
 
-    # PID Controller C(s)
+    # PID Controller C(s) = (Kd*s^2 + Kp*s + Ki) / s
     num_c = [kd, kp, ki]
     den_c = [1, 0]
 
@@ -39,17 +40,16 @@ def compute_response(v_target, kp, ki, kd):
     den_closed = np.polyadd(den_open, num_open)
     sys_cl = signal.TransferFunction(num_open, den_closed)
 
-    # Step response scaled to angular velocity and then to linear velocity
-    _, omega_response = signal.step(sys_cl, T=t)
-    omega_response = omega_response * target_angular_speed_rad
-    return omega_response * wheel_radius
+    # Step response for unit input scaled to target linear velocity
+    _, response = signal.step(sys_cl, T=t)
+
+    # Scale normalized unit step response to target linear velocity (m/s)
+    return response * v_target
 
 
 # --- 2. Figure Setup & Layout ---
-fig, ax = plt.subplots(figsize=(10, 7))
-plt.subplots_adjust(
-    bottom=0.38
-)  # Extra bottom space allocated for 4 total sliders
+fig, ax = plt.subplots(figsize=(10, 8))
+plt.subplots_adjust(bottom=0.42)  # Space allocated for sliders and zoom controls
 
 # Initial response calculation
 initial_v = compute_response(
@@ -77,12 +77,13 @@ ax.set_ylabel("Linear Velocity (m/s)")
 ax.grid(True, linestyle=":", alpha=0.7)
 ax.legend(loc="lower right")
 
-# --- 3. Interactive UI Sliders ---
-# Slider Axes: [left, bottom, width, height]
-ax_vt = plt.axes([0.18, 0.24, 0.68, 0.03])
-ax_kp = plt.axes([0.18, 0.17, 0.68, 0.03])
-ax_ki = plt.axes([0.18, 0.10, 0.68, 0.03])
-ax_kd = plt.axes([0.18, 0.03, 0.68, 0.03])
+# --- 3. Interactive UI Sliders & Zoom Button ---
+# Axes geometry: [left, bottom, width, height]
+ax_vt = plt.axes([0.18, 0.30, 0.68, 0.03])
+ax_kp = plt.axes([0.18, 0.23, 0.68, 0.03])
+ax_ki = plt.axes([0.18, 0.16, 0.68, 0.03])
+ax_kd = plt.axes([0.18, 0.09, 0.68, 0.03])
+ax_btn = plt.axes([0.18, 0.02, 0.25, 0.04])  # Reset Zoom Button
 
 s_vt = Slider(
     ax_vt,
@@ -92,35 +93,41 @@ s_vt = Slider(
     valinit=target_linear_speed_init,
     valstep=0.05,
 )
-s_kp = Slider(ax_kp, "Kp", 0.0, 30.0, valinit=Kp_init, valstep=0.1)
-s_ki = Slider(ax_ki, "Ki", 0.0, 500.0, valinit=Ki_init, valstep=1.0)
-s_kd = Slider(ax_kd, "Kd", 0.0, 0.5, valinit=Kd_init, valstep=0.001)
+s_kp = Slider(ax_kp, "Kp", 0.0, 300.0, valinit=Kp_init, valstep=0.1)
+s_ki = Slider(ax_ki, "Ki", 0.0, 1000.0, valinit=Ki_init, valstep=1.0)
+s_kd = Slider(ax_kd, "Kd", 0.0, 500.0, valinit=Kd_init, valstep=0.001)
+
+btn_reset_zoom = Button(ax_btn, "Reset View / Auto-Zoom", hovercolor="0.97")
 
 
-# --- 4. Callback Function ---
+# --- 4. Callback Functions ---
 def update(val):
     v_target = s_vt.val
     kp = s_kp.val
     ki = s_ki.val
     kd = s_kd.val
 
-    # Update actual velocity response plot
+    # Update plot lines
     line_speed.set_ydata(compute_response(v_target, kp, ki, kd))
-
-    # Update reference line height and legend string
     line_target.set_ydata([v_target, v_target])
     line_target.set_label(f"Target Speed ({v_target:.2f} m/s)")
     ax.legend(loc="lower right")
 
-    # Rescale plot bounds dynamically
-    ax.relim()
-    ax.autoscale_view(scalex=False, scaley=True)
     fig.canvas.draw_idle()
 
 
+def reset_zoom(event):
+    """Resets plot limits to fit the data bounds automatically."""
+    ax.relim()
+    ax.autoscale_view()
+    fig.canvas.draw_idle()
+
+
+# Attach callbacks
 s_vt.on_changed(update)
 s_kp.on_changed(update)
 s_ki.on_changed(update)
 s_kd.on_changed(update)
+btn_reset_zoom.on_clicked(reset_zoom)
 
-plt.show()   
+plt.show()
